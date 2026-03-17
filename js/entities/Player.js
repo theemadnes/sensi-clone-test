@@ -105,37 +105,110 @@ export class Player {
 
     handleAI(gameState) {
         if (!gameState) return;
-        const { ball, pitch } = gameState;
+        const { ball, pitch, teammates, opponents } = gameState;
 
         if (this.role === 'GK') {
             this.handleGoalkeeperAI(ball, pitch);
             return;
         }
 
-        // Basic Field Player AI
-        const distToBall = Math.sqrt((this.x - ball.x) ** 2 + (this.y - ball.y) ** 2);
-        const distToBase = Math.sqrt((this.x - this.baseX) ** 2 + (this.y - this.baseY) ** 2);
+        const distToBall = Math.sqrt((this.x - ball.x)**2 + (this.y - ball.y)**2);
+        const distToBase = Math.sqrt((this.x - this.baseX)**2 + (this.y - this.baseY)**2);
 
-        // If ball is close, chase it
-        if (distToBall < 180) {
-            let dx = ball.x - this.x;
-            let dy = ball.y - this.y;
-            let len = Math.sqrt(dx * dx + dy * dy);
-            if (len > 0) {
-                this.vx += (dx / len) * this.acceleration * 0.6;
-                this.vy += (dy / len) * this.acceleration * 0.6;
-                this.facing = { x: dx / len, y: dy / len };
+        // 1. If I have the ball, move towards the opponent's goal or look for a pass
+        if (this.hasBall) {
+            this.handleBallCarrierAI(gameState);
+            return;
+        }
+
+        // 2. Support/Defend Logic based on who has the ball
+        if (ball.controlledBy) {
+            if (ball.controlledBy.teamId === this.teamId) {
+                // SUPPORT: A teammate has the ball. Make a run!
+                this.handleSupportAI(ball, pitch);
+                return;
+            } else {
+                // DEFEND: An opponent has the ball. Mark or block!
+                this.handleDefensiveAI(ball, pitch);
+                
+                // Trigger tackle if close to opponent
+                if (distToBall < 50 && distToBall > 20 && Math.random() < 0.05) {
+                    this.startTackle();
+                }
+                return;
             }
-        } else if (distToBase > 20) {
-            // Otherwise, return to base position
-            let dx = this.baseX - this.x;
-            let dy = this.baseY - this.y;
-            let len = Math.sqrt(dx * dx + dy * dy);
-            if (len > 0) {
-                this.vx += (dx / len) * this.acceleration * 0.4;
-                this.vy += (dy / len) * this.acceleration * 0.4;
-                this.facing = { x: dx / len, y: dy / len };
+        }
+
+        // 3. Loose ball logic
+        const isChaser = this.isAIChaser; 
+        if (isChaser || distToBall < 100) {
+            this.moveTo(ball.x, ball.y, 0.7);
+        } else {
+            // Return to formation
+            if (distToBase > 20) {
+                this.moveTo(this.baseX, this.baseY, 0.4);
             }
+        }
+    }
+
+    handleSupportAI(ball, pitch) {
+        // Find a position ahead of the ball carrier
+        const attackDir = this.teamId === 0 ? -1 : 1;
+        
+        // Target a position that is:
+        // - Ahead of the ball carrier (y-axis)
+        // - Near the player's natural horizontal lane (baseX)
+        // - Slightly offset towards the ball's X to be available
+        const targetY = ball.y + attackDir * 150;
+        const targetX = (this.baseX * 0.7) + (ball.x * 0.3);
+
+        // Clamp target within pitch
+        const clampedY = Math.max(pitch.bounds.top + 50, Math.min(pitch.bounds.bottom - 50, targetY));
+        
+        this.moveTo(targetX, clampedY, 0.6);
+    }
+
+    handleDefensiveAI(ball, pitch) {
+        // Position self between the ball and our own goal
+        const ourGoalY = this.teamId === 0 ? pitch.bounds.bottom : pitch.bounds.top;
+        const ourGoalX = pitch.width / 2;
+
+        // Target point is 30% of the way from player's base to the ball, 
+        // but weighted towards staying "goal-side"
+        const targetX = (this.baseX * 0.5) + (ball.x * 0.5);
+        const targetY = (this.baseY * 0.5) + (ball.y * 0.5);
+
+        // Ensure we are always "below" the ball if defending bottom goal (team 0)
+        // or "above" it if defending top goal (team 1)
+        const defendDir = this.teamId === 0 ? 1 : -1;
+        let finalY = targetY;
+        if ((ball.y - finalY) * defendDir < 0) {
+            finalY = ball.y + defendDir * 40;
+        }
+
+        this.moveTo(targetX, finalY, 0.5);
+    }
+
+    handleBallCarrierAI(gameState) {
+        const { pitch } = gameState;
+        // Target is the center of the opponent's goal
+        const targetY = this.teamId === 0 ? pitch.bounds.top : pitch.bounds.bottom;
+        const targetX = pitch.width / 2;
+
+        this.moveTo(targetX, targetY, 0.8);
+
+        // Shooting logic is handled in Game.js for now, 
+        // but we could add passing logic here later.
+    }
+
+    moveTo(tx, ty, speedMult) {
+        let dx = tx - this.x;
+        let dy = ty - this.y;
+        let len = Math.sqrt(dx*dx + dy*dy);
+        if (len > 0) {
+            this.vx += (dx / len) * this.acceleration * speedMult;
+            this.vy += (dy / len) * this.acceleration * speedMult;
+            this.facing = { x: dx / len, y: dy / len };
         }
     }
 

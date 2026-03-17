@@ -29,6 +29,11 @@ export class Game {
         this.lastTime = 0;
         this.dribbleDistance = 12;
         this.ballSnatchCooldown = 0;
+        this.aftertouchTimer = 0;
+        this.aftertouchDuration = 60; // 1 second of control
+        this.isPaused = false;
+        this.gameMinutes = 0;
+        this.elapsedRealTime = 0;
     }
 
     start() {
@@ -45,12 +50,23 @@ export class Game {
 
         this.update(dt);
         this.draw();
+        
+        this.inputManager.postUpdate();
 
         requestAnimationFrame((t) => this.loop(t));
     }
 
     update(dt) {
         this.inputManager.update();
+
+        // Pause Toggle
+        if (this.inputManager.justPressedKeys['KeyP']) {
+            this.togglePause();
+            return;
+        }
+
+        if (this.isPaused) return;
+
         if (this.ballSnatchCooldown > 0) this.ballSnatchCooldown--;
 
         if (this.inputManager.keys['KeyR']) {
@@ -63,6 +79,28 @@ export class Game {
             document.getElementById('message-overlay').style.display = 'none';
         }
 
+        if (this.state === 'PLAYING') {
+            this.elapsedRealTime += dt;
+            if (this.elapsedRealTime >= 1000) {
+                this.gameMinutes += 1;
+                this.elapsedRealTime -= 1000;
+                
+                // Update timer UI
+                const timerEl = document.getElementById('timer');
+                if (timerEl) {
+                    timerEl.innerText = `${this.gameMinutes.toString().padStart(2, '0')}:00`;
+                }
+
+                if (this.gameMinutes >= 90) {
+                    this.state = 'ENDED';
+                    const msg = document.getElementById('message-overlay');
+                    msg.innerText = "FULL TIME!";
+                    msg.style.display = 'block';
+                    return;
+                }
+            }
+        }
+
         if (this.state !== 'PLAYING') {
             // If in GOAL state, let the ball update its physics so it rolls into net,
             // but keep players from interacting with it.
@@ -73,6 +111,10 @@ export class Game {
                     this.ball.vx = 0;
                     this.ball.vy = 0;
                 }
+            } else if (this.state === 'ENDED') {
+                // Final whistle logic
+                this.ball.vx = 0;
+                this.ball.vy = 0;
             } else {
                 // START state - ball definitely stopped
                 if (this.ball) {
@@ -87,38 +129,118 @@ export class Game {
         const gameState = { ball: this.ball, pitch: this.pitch };
         const controlledPlayer = this.team1.players[this.team1.controlledPlayerIndex];
 
-        // Team 1 (Human)
+        // Assign chasers for both teams
+        this.assignChaser(this.team1);
+        this.assignChaser(this.team2);
+
+        // Team 1 (Human & AI Teammates)
         this.team1.players.forEach((p, index) => {
-            p.update(this.inputManager, index === this.team1.controlledPlayerIndex, gameState);
+            const isHuman = index === this.team1.controlledPlayerIndex;
+            p.update(this.inputManager, isHuman, { ...gameState, teammates: this.team1.players, opponents: this.team2.players });
             this.handlePlayerBallCollision(p);
+
+            // If an AI teammate has the ball, let them act
+            if (!isHuman && this.ball.controlledBy === p) {
+                const goalY = this.pitch.bounds.top;
+                const distToGoal = Math.sqrt((p.x - this.width / 2)**2 + (p.y - goalY)**2);
+                if (distToGoal < 280) {
+                    this.aiShoot(p, this.width / 2, goalY);
+                } else if (Math.random() < 0.015) {
+                    this.aiPass(p);
+                }
+            }
         });
 
-        // Team 2 (AI)
+        // Team 2 (AI Opponents)
         this.team2.players.forEach(p => {
-            p.update(null, false, gameState);
+            p.update(null, false, { ...gameState, teammates: this.team2.players, opponents: this.team1.players });
             this.handlePlayerBallCollision(p);
 
-            // Opponent specific action: Shoot if near goal
+            // Opponent action: Shoot or Pass
             if (this.ball.controlledBy === p) {
-                const distToGoal = Math.sqrt((p.x - this.width / 2)**2 + (p.y - this.pitch.bounds.bottom)**2);
-                if (distToGoal < 300) {
-                    // Shoot towards bottom goal
-                    const dx = this.width / 2 - p.x;
-                    const dy = this.pitch.bounds.bottom - p.y;
-                    const len = Math.sqrt(dx*dx + dy*dy);
-                    this.ball.kick((dx/len)*8, (dy/len)*8);
-                    p.hasBall = false;
-                    p.actionCooldown = 60;
+                const goalY = this.pitch.bounds.bottom;
+                const distToGoal = Math.sqrt((p.x - this.width / 2)**2 + (p.y - goalY)**2);
+                
+                if (distToGoal < 280) {
+                    this.aiShoot(p, this.width / 2, goalY);
+                } else if (Math.random() < 0.02) {
+                    this.aiPass(p);
                 }
             }
         });
 
         this.ball.update(this.pitch);
+
+        // Aftertouch - allow human to curve ball after kick
+        if (this.aftertouchTimer > 0 && !this.ball.controlledBy) {
+            this.aftertouchTimer--;
+            const curveStrength = 0.1;
+            this.ball.curve.x = this.inputManager.x * curveStrength;
+            this.ball.curve.y = this.inputManager.y * curveStrength;
+        } else {
+            // Decay curve if not being steered
+            this.ball.curve.x *= 0.9;
+            this.ball.curve.y *= 0.9;
+            if (Math.abs(this.ball.curve.x) < 0.001) {
+                this.ball.curve.x = 0;
+                this.ball.curve.y = 0;
+            }
+        }
         
         this.checkInputActions(controlledPlayer);
         this.checkGoal();
     }
     
+    assignChaser(team) {
+        let minDist = Infinity;
+        let bestIndex = -1;
+
+        team.players.forEach((p, i) => {
+            p.isAIChaser = false;
+            if (p.role === 'GK' || p.isTackling) return;
+            
+            // For Team 1, don't assign chaser to human controlled player
+            if (team.id === 0 && i === team.controlledPlayerIndex) return;
+
+            const dist = Math.sqrt((p.x - this.ball.x)**2 + (p.y - this.ball.y)**2);
+            if (dist < minDist) {
+                minDist = dist;
+                bestIndex = i;
+            }
+        });
+
+        if (bestIndex !== -1) {
+            team.players[bestIndex].isAIChaser = true;
+        }
+    }
+
+    aiShoot(p, tx, ty) {
+        const dx = tx - p.x;
+        const dy = ty - p.y;
+        const len = Math.sqrt(dx*dx + dy*dy);
+        this.ball.kick((dx/len)*8, (dy/len)*8);
+        p.hasBall = false;
+        p.actionCooldown = 60;
+    }
+
+    aiPass(p) {
+        const team = p.teamId === 0 ? this.team1 : this.team2;
+        // Find a teammate ahead of us
+        const direction = p.teamId === 0 ? -1 : 1;
+        const targets = team.players.filter(t => t !== p && t.role !== 'GK' && (t.y - p.y) * direction > 0);
+        
+        if (targets.length > 0) {
+            const target = targets[Math.floor(Math.random() * targets.length)];
+            const dx = target.x - p.x;
+            const dy = target.y - p.y;
+            const len = Math.sqrt(dx*dx + dy*dy);
+            this.ball.kick((dx/len)*6, (dy/len)*6);
+            p.hasBall = false;
+            p.actionCooldown = 40;
+            this.ballSnatchCooldown = 10;
+        }
+    }
+
     handlePlayerBallCollision(player) {
         if (this.ballSnatchCooldown > 0) return;
         if (this.ball.controlledBy === player) return; 
@@ -173,11 +295,10 @@ export class Game {
                 let kickVx = Math.cos(angle) * kickSpeed;
                 let kickVy = Math.sin(angle) * kickSpeed;
                 
-                // Aftertouch calculation (based on input immediately after kick, simple implementation for now)
-                let curveX = this.inputManager.x * 0.2;
-                let curveY = this.inputManager.y * 0.2;
+                // Set aftertouch timer for human
+                this.aftertouchTimer = this.aftertouchDuration;
 
-                this.ball.kick(kickVx, kickVy, curveX, curveY);
+                this.ball.kick(kickVx, kickVy, 0, 0);
                 player.hasBall = false;
                 player.actionCooldown = 30; // Frames before can touch ball again
                 this.ballSnatchCooldown = 5; // Slight delay so kicker doesn't immediately retake
@@ -261,11 +382,33 @@ export class Game {
         this.resetPositions();
         this.scores[0] = 0;
         this.scores[1] = 0;
+        this.gameMinutes = 0;
+        this.elapsedRealTime = 0;
         document.getElementById('team1-score').innerText = '0';
         document.getElementById('team2-score').innerText = '0';
+        document.getElementById('timer').innerText = '00:00';
         this.state = 'START';
         document.getElementById('message-overlay').innerText = "Press Any Key or Gamepad Button to Start";
         document.getElementById('message-overlay').style.display = 'block';
+    }
+
+    togglePause() {
+        this.isPaused = !this.isPaused;
+        const msg = document.getElementById('message-overlay');
+        if (this.isPaused) {
+            msg.innerText = "PAUSED";
+            msg.style.display = 'block';
+        } else {
+            if (this.state === 'PLAYING') {
+                msg.style.display = 'none';
+            } else if (this.state === 'START') {
+                msg.innerText = "Press Any Key or Gamepad Button to Start";
+                msg.style.display = 'block';
+            } else if (this.state === 'GOAL') {
+                msg.innerText = "GOAL!";
+                msg.style.display = 'block';
+            }
+        }
     }
 
     draw() {

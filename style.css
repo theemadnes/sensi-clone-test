@@ -75,3 +75,18 @@ body {
     padding: 20px 40px;
     border-radius: 10px;
 }
+
+#controls-banner {
+    position: absolute;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.7);
+    color: #eee;
+    padding: 8px 16px;
+    font-size: 0.9rem;
+    border-radius: 20px;
+    border: 1px solid #444;
+    white-space: nowrap;
+    text-shadow: 1px 1px 0 #000;
+}

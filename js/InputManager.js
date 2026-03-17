@@ -1,14 +1,22 @@
 export class InputManager {
     constructor() {
         this.keys = {};
+        this.justPressedKeys = {};
         this.actionPressed = false;
         this.actionJustPressed = false;
         
         this.x = 0; // -1 to 1
         this.y = 0; // -1 to 1
 
-        window.addEventListener('keydown', (e) => this.keys[e.code] = true);
-        window.addEventListener('keyup', (e) => this.keys[e.code] = false);
+        window.addEventListener('keydown', (e) => {
+            if (!this.keys[e.code]) {
+                this.justPressedKeys[e.code] = true;
+            }
+            this.keys[e.code] = true;
+        });
+        window.addEventListener('keyup', (e) => {
+            this.keys[e.code] = false;
+        });
     }
 
     update() {
@@ -60,6 +68,11 @@ export class InputManager {
         this.actionJustPressed = this.actionPressed && !actionWasPressed;
     }
     
+    // Call this at the very end of the game loop after everything has had a chance to check justPressedKeys
+    postUpdate() {
+        this.justPressedKeys = {};
+    }
+
     get anyInput() {
         return this.x !== 0 || this.y !== 0 || this.actionPressed;
     }
