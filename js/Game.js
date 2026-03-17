@@ -19,6 +19,8 @@ export class Game {
         this.team1 = new Team(0, 'Home', '#ff0000', this.width, this.height, true);
         this.team2 = new Team(1, 'Away', '#0000ff', this.width, this.height, false);
         
+        this.scores = { 0: 0, 1: 0 }; // Separate score management
+
         this.inputManager = new InputManager();
         this.renderer = new Renderer(this.ctx, this.width, this.height);
         
@@ -26,6 +28,7 @@ export class Game {
         
         this.lastTime = 0;
         this.dribbleDistance = 12;
+        this.ballSnatchCooldown = 0;
     }
 
     start() {
@@ -36,6 +39,7 @@ export class Game {
     }
 
     loop(timestamp) {
+        if (!this.lastTime) this.lastTime = timestamp;
         const dt = timestamp - this.lastTime;
         this.lastTime = timestamp;
 
@@ -47,37 +51,55 @@ export class Game {
 
     update(dt) {
         this.inputManager.update();
+        if (this.ballSnatchCooldown > 0) this.ballSnatchCooldown--;
+
+        if (this.inputManager.keys['KeyR']) {
+            this.resetMatch();
+            return;
+        }
 
         if (this.state === 'START' && this.inputManager.anyInput) {
             this.state = 'PLAYING';
             document.getElementById('message-overlay').style.display = 'none';
         }
 
-        if (this.state !== 'PLAYING') return;
+        if (this.state !== 'PLAYING') {
+            // Keep ball stopped when game is paused/waiting
+            if (this.ball) {
+                this.ball.vx = 0;
+                this.ball.vy = 0;
+                this.ball.curve = { x: 0, y: 0 };
+            }
+            return;
+        }
 
-        // Player to update based on input
-        let controlledPlayer = this.team1.players[this.team1.controlledPlayerIndex];
-        
-        // Let's implement auto-switching later, for now just update
+        const gameState = { ball: this.ball, pitch: this.pitch };
+        const controlledPlayer = this.team1.players[this.team1.controlledPlayerIndex];
+
+        // Team 1 (Human)
         this.team1.players.forEach((p, index) => {
-            p.update(this.inputManager, index === this.team1.controlledPlayerIndex);
+            p.update(this.inputManager, index === this.team1.controlledPlayerIndex, gameState);
             this.handlePlayerBallCollision(p);
         });
 
+        // Team 2 (AI)
         this.team2.players.forEach(p => {
-            // Very basic AI for team 2: follow ball slowly if nearby
-            let dx = this.ball.x - p.x;
-            let dy = this.ball.y - p.y;
-            let dist = Math.sqrt(dx*dx + dy*dy);
-            
-            if (dist < 150) {
-                p.vx += (dx / dist) * 0.1;
-                p.vy += (dy / dist) * 0.1;
-                p.facing = { x: dx / dist, y: dy / dist };
-            }
-            
-            p.update({ x: 0, y: 0, anyInput: false }, false); // Update with no input to apply friction
+            p.update(null, false, gameState);
             this.handlePlayerBallCollision(p);
+
+            // Opponent specific action: Shoot if near goal
+            if (this.ball.controlledBy === p) {
+                const distToGoal = Math.sqrt((p.x - this.width / 2)**2 + (p.y - this.pitch.bounds.bottom)**2);
+                if (distToGoal < 300) {
+                    // Shoot towards bottom goal
+                    const dx = this.width / 2 - p.x;
+                    const dy = this.pitch.bounds.bottom - p.y;
+                    const len = Math.sqrt(dx*dx + dy*dy);
+                    this.ball.kick((dx/len)*8, (dy/len)*8);
+                    p.hasBall = false;
+                    p.actionCooldown = 60;
+                }
+            }
         });
 
         this.ball.update(this.pitch);
@@ -87,19 +109,27 @@ export class Game {
     }
     
     handlePlayerBallCollision(player) {
-        // If ball is already controlled by another player, maybe allow tackling? 
-        // For now, simpler dribbling:
-        
-        if (this.ball.controlledBy === player) return; // Handled in checkInputActions
+        if (this.ballSnatchCooldown > 0) return;
+        if (this.ball.controlledBy === player) return; 
         
         let dx = this.ball.x - player.x;
         let dy = this.ball.y - player.y;
         let dist = Math.sqrt(dx*dx + dy*dy);
         
-        if (dist < player.radius + this.ball.radius + 4 && player.actionCooldown <= 0) {
+        // Increased radius and priority for winning ball during tackle
+        const interactionRadius = player.isTackling ? (player.radius + 15) : (player.radius + this.ball.radius + 2);
+        
+        if (dist < interactionRadius && player.actionCooldown <= 0) {
+            // If opponent has ball, tackle steals it
+            if (this.ball.controlledBy && this.ball.controlledBy.teamId !== player.teamId) {
+                this.ball.controlledBy.hasBall = false;
+                this.ball.controlledBy.actionCooldown = 50; // Delay for victim
+            }
+
             // Steal or take control of the ball
             this.ball.controlledBy = player;
             player.hasBall = true;
+            this.ballSnatchCooldown = 15; // Global delay before another steal to prevent "jitter"
             
             // Switch control to this player if on team 1
             if (player.teamId === 0) {
@@ -139,11 +169,17 @@ export class Game {
                 this.ball.kick(kickVx, kickVy, curveX, curveY);
                 player.hasBall = false;
                 player.actionCooldown = 30; // Frames before can touch ball again
+                this.ballSnatchCooldown = 5; // Slight delay so kicker doesn't immediately retake
             }
         } else {
-            // If don't have ball, maybe switch player or tackle (slide tackle not implemented yet)
+            // If don't have ball, trigger tackle or switch player
             if (this.inputManager.actionJustPressed) {
-                this.switchPlayer();
+                const isMoving = Math.abs(this.inputManager.x) > 0.1 || Math.abs(this.inputManager.y) > 0.1;
+                if (isMoving) {
+                    player.startTackle();
+                } else {
+                    this.switchPlayer();
+                }
             }
         }
     }
@@ -183,11 +219,16 @@ export class Game {
         if (this.state === 'GOAL') return;
         
         this.state = 'GOAL';
-        if (scoringTeamId === 0) this.team1.score++;
-        else this.team2.score++;
+        // Immediately stop the ball
+        this.ball.vx = 0;
+        this.ball.vy = 0;
+        this.ball.curve = { x: 0, y: 0 };
+        this.ball.controlledBy = null;
+
+        this.scores[scoringTeamId]++;
         
-        document.getElementById('team1-score').innerText = this.team1.score;
-        document.getElementById('team2-score').innerText = this.team2.score;
+        document.getElementById('team1-score').innerText = this.scores[0];
+        document.getElementById('team2-score').innerText = this.scores[1];
         
         let msg = document.getElementById('message-overlay');
         msg.innerText = "GOAL!";
@@ -201,14 +242,23 @@ export class Game {
     }
     
     resetPositions() {
-        // Re-init team positions
+        // Re-init team positions (new Players start with 0 velocity)
         this.team1 = new Team(0, 'Home', '#ff0000', this.width, this.height, true);
         this.team2 = new Team(1, 'Away', '#0000ff', this.width, this.height, false);
-        this.ball.x = this.width / 2;
-        this.ball.y = this.height / 2;
-        this.ball.vx = 0;
-        this.ball.vy = 0;
-        this.ball.controlledBy = null;
+        
+        // Re-create the ball to be 100% sure all state is cleared
+        this.ball = new Ball(this.width / 2, this.height / 2);
+    }
+
+    resetMatch() {
+        this.resetPositions();
+        this.scores[0] = 0;
+        this.scores[1] = 0;
+        document.getElementById('team1-score').innerText = '0';
+        document.getElementById('team2-score').innerText = '0';
+        this.state = 'START';
+        document.getElementById('message-overlay').innerText = "Press Any Key or Gamepad Button to Start";
+        document.getElementById('message-overlay').style.display = 'block';
     }
 
     draw() {

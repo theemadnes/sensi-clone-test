@@ -82,40 +82,92 @@ export class Renderer {
     }
 
     drawPlayer(player) {
+        const pSize = 2; // Pixel size
+        const px = Math.floor(player.x);
+        const py = Math.floor(player.y);
+
+        this.ctx.save();
+        this.ctx.translate(px, py);
+        
+        if (player.isTackling) {
+            // Rotate player for sliding look
+            const angle = Math.atan2(player.vy, player.vx);
+            this.ctx.rotate(angle);
+        }
+
         // Highlight indicator
         if (player.isHighlighted) {
-            this.ctx.fillStyle = 'rgba(255, 255, 0, 0.5)';
+            this.ctx.fillStyle = 'rgba(255, 255, 0, 0.4)';
             this.ctx.beginPath();
-            this.ctx.arc(player.x, player.y, player.radius + 4, 0, Math.PI * 2);
+            this.ctx.arc(0, 0, 12, 0, Math.PI * 2);
             this.ctx.fill();
         }
 
-        // Body
-        this.ctx.fillStyle = player.color;
-        this.ctx.beginPath();
-        this.ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
-        this.ctx.fill();
-        
-        this.ctx.strokeStyle = '#000';
-        this.ctx.lineWidth = 1;
-        this.ctx.stroke();
-
-        // Hair/Head (simple top down view)
-        this.ctx.fillStyle = '#8B4513'; // Brown hair
-        this.ctx.beginPath();
-        this.ctx.arc(player.x, player.y, player.radius * 0.5, 0, Math.PI * 2);
-        this.ctx.fill();
-
-        // Direction indicator (nose or shoulders)
-        this.ctx.strokeStyle = '#fff';
-        this.ctx.beginPath();
-        this.ctx.moveTo(player.x, player.y);
-        let facingLen = Math.sqrt(player.facing.x*player.facing.x + player.facing.y*player.facing.y);
-        if (facingLen > 0) {
-            this.ctx.lineTo(player.x + (player.facing.x / facingLen) * player.radius, 
-                            player.y + (player.facing.y / facingLen) * player.radius);
-            this.ctx.stroke();
+        // Shadow
+        this.ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        if (player.isTackling) {
+            this.ctx.fillRect(-8, 4, 16, 4);
+        } else {
+            this.ctx.fillRect(-4, 6, 8, 4);
         }
+
+        // Shirt / Torso (4x3 blocks)
+        this.ctx.fillStyle = player.color;
+        if (player.isTackling) {
+            this.ctx.fillRect(-8, -2, 12, 4);
+        } else {
+            this.ctx.fillRect(-6, -4, 12, 6);
+        }
+        
+        // Skin / Neck area (small 2x2 block)
+        this.ctx.fillStyle = '#f1c27d'; // Skin tone
+        if (player.isTackling) {
+            this.ctx.fillRect(4, -2, 4, 4);
+        } else {
+            this.ctx.fillRect(-2, -6, 4, 4);
+        }
+        
+        // Hair (4x2 block)
+        this.ctx.fillStyle = '#4e342e'; // Dark hair
+        if (player.isTackling) {
+            this.ctx.fillRect(8, -2, 4, 4);
+        } else {
+            this.ctx.fillRect(-4, -8, 8, 4);
+        }
+
+        // Shorts (White)
+        this.ctx.fillStyle = '#fff';
+        if (player.isTackling) {
+            this.ctx.fillRect(-12, -2, 4, 4);
+        } else {
+            this.ctx.fillRect(-5, 2, 10, 4);
+        }
+
+        // Legs & Animation
+        if (!player.isTackling) {
+            this.ctx.fillStyle = '#f1c27d'; // Skin tone legs
+            let frameOffset = (player.animFrame === 1) ? 2 : (player.animFrame === 3) ? -2 : 0;
+            
+            // Left Leg
+            this.ctx.fillRect(-4, 6, 3, 4 + frameOffset);
+            // Right Leg
+            this.ctx.fillRect(1, 6, 3, 4 - frameOffset);
+
+            // Boots (Black)
+            this.ctx.fillStyle = '#000';
+            this.ctx.fillRect(-4, 10 + frameOffset, 3, 2);
+            this.ctx.fillRect(1, 10 - frameOffset, 3, 2);
+        } else {
+            // Sliding legs (stretched out)
+            this.ctx.fillStyle = '#f1c27d';
+            this.ctx.fillRect(-16, -2, 4, 3);
+            this.ctx.fillRect(-14, 0, 4, 3);
+            this.ctx.fillStyle = '#000';
+            this.ctx.fillRect(-18, -2, 2, 3);
+            this.ctx.fillRect(-16, 0, 2, 3);
+        }
+
+        this.ctx.restore();
     }
 
     drawBall(ball) {
