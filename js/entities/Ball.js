@@ -31,8 +31,38 @@ export class Ball {
         this.x += this.vx;
         this.y += this.vy;
 
-        // Boundaries check (bouncing off pitch walls if not a goal)
-        // Simplistic bound checks
+        this.handleCollisions(pitch);
+    }
+
+    handleCollisions(pitch) {
+        // 1. Goal Post Collisions (Circular)
+        const posts = [
+            { x: pitch.topGoal.left, y: pitch.bounds.top },
+            { x: pitch.topGoal.right, y: pitch.bounds.top },
+            { x: pitch.bottomGoal.left, y: pitch.bounds.bottom },
+            { x: pitch.bottomGoal.right, y: pitch.bounds.bottom }
+        ];
+
+        posts.forEach(post => {
+            const dx = this.x - post.x;
+            const dy = this.y - post.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const minDist = this.radius + 4; // Post radius approx 4
+
+            if (dist < minDist) {
+                // Bounce off post
+                const angle = Math.atan2(dy, dx);
+                this.x = post.x + Math.cos(angle) * minDist;
+                this.y = post.y + Math.sin(angle) * minDist;
+                
+                // Simple reflection
+                const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+                this.vx = Math.cos(angle) * speed * 0.7;
+                this.vy = Math.sin(angle) * speed * 0.7;
+            }
+        });
+
+        // 2. Pitch Boundary Collisions
         if (this.x - this.radius < pitch.bounds.left) {
             this.x = pitch.bounds.left + this.radius;
             this.vx *= -0.8;
@@ -41,14 +71,31 @@ export class Ball {
             this.vx *= -0.8;
         }
 
-        // Top/Bottom boundaries (Need to check if inside goal width)
-        let isGoalBoundX = this.x > pitch.topGoal.left && this.x < pitch.topGoal.right;
-        
-        if (!isGoalBoundX) {
+        // Top/Bottom Goal Logic
+        const inTopGoalX = this.x > pitch.topGoal.left && this.x < pitch.topGoal.right;
+        const inBottomGoalX = this.x > pitch.bottomGoal.left && this.x < pitch.bottomGoal.right;
+
+        if (inTopGoalX) {
+            // Check back/sides of top goal net
+            if (this.y - this.radius < pitch.topGoal.top) {
+                this.y = pitch.topGoal.top + this.radius;
+                this.vy *= -0.3; // Net absorbs energy
+            }
+        } else {
             if (this.y - this.radius < pitch.bounds.top) {
                 this.y = pitch.bounds.top + this.radius;
                 this.vy *= -0.8;
-            } else if (this.y + this.radius > pitch.bounds.bottom) {
+            }
+        }
+
+        if (inBottomGoalX) {
+            // Check back/sides of bottom goal net
+            if (this.y + this.radius > pitch.bottomGoal.bottom) {
+                this.y = pitch.bottomGoal.bottom - this.radius;
+                this.vy *= -0.3;
+            }
+        } else {
+            if (this.y + this.radius > pitch.bounds.bottom) {
                 this.y = pitch.bounds.bottom - this.radius;
                 this.vy *= -0.8;
             }

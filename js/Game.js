@@ -64,11 +64,22 @@ export class Game {
         }
 
         if (this.state !== 'PLAYING') {
-            // Keep ball stopped when game is paused/waiting
-            if (this.ball) {
-                this.ball.vx = 0;
-                this.ball.vy = 0;
-                this.ball.curve = { x: 0, y: 0 };
+            // If in GOAL state, let the ball update its physics so it rolls into net,
+            // but keep players from interacting with it.
+            if (this.state === 'GOAL') {
+                this.ball.update(this.pitch);
+                // Extra boundary check to keep ball inside net
+                if (this.ball.y < this.pitch.topGoal.top || this.ball.y > this.pitch.bottomGoal.bottom) {
+                    this.ball.vx = 0;
+                    this.ball.vy = 0;
+                }
+            } else {
+                // START state - ball definitely stopped
+                if (this.ball) {
+                    this.ball.vx = 0;
+                    this.ball.vy = 0;
+                    this.ball.curve = { x: 0, y: 0 };
+                }
             }
             return;
         }
@@ -219,11 +230,7 @@ export class Game {
         if (this.state === 'GOAL') return;
         
         this.state = 'GOAL';
-        // Immediately stop the ball
-        this.ball.vx = 0;
-        this.ball.vy = 0;
-        this.ball.curve = { x: 0, y: 0 };
-        this.ball.controlledBy = null;
+        this.ball.controlledBy = null; // Release ball to fly into net
 
         this.scores[scoringTeamId]++;
         

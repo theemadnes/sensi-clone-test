@@ -27,41 +27,58 @@ export class Renderer {
             this.ctx.fillRect(pitch.bounds.left, y, pitch.bounds.right - pitch.bounds.left, stripeHeight);
         }
 
-        // Pitch Lines
+        // Pitch Lines Setup
         this.ctx.strokeStyle = '#fff';
         this.ctx.lineWidth = 2;
-        this.ctx.beginPath();
         
         // Outer boundary
+        this.ctx.beginPath();
         this.ctx.rect(pitch.bounds.left, pitch.bounds.top, pitch.bounds.right - pitch.bounds.left, pitch.bounds.bottom - pitch.bounds.top);
+        this.ctx.stroke();
         
         // Halfway line
+        this.ctx.beginPath();
         this.ctx.moveTo(pitch.bounds.left, this.height / 2);
         this.ctx.lineTo(pitch.bounds.right, this.height / 2);
+        this.ctx.stroke();
         
         // Center circle
-        this.ctx.moveTo(this.width / 2 + 50, this.height / 2);
+        this.ctx.beginPath();
         this.ctx.arc(this.width / 2, this.height / 2, 50, 0, Math.PI * 2);
+        this.ctx.stroke();
         
         // Center dot
+        this.ctx.fillStyle = '#fff';
         this.ctx.fillRect(this.width / 2 - 2, this.height / 2 - 2, 4, 4);
 
         // Top Penalty Area
+        this.ctx.beginPath();
         this.ctx.rect(this.width / 2 - 100, pitch.bounds.top, 200, 100);
+        this.ctx.stroke();
+
         // Top Goal Area
+        this.ctx.beginPath();
         this.ctx.rect(this.width / 2 - 50, pitch.bounds.top, 100, 30);
+        this.ctx.stroke();
+
         // Top Penalty Arc
-        this.ctx.moveTo(this.width / 2 + 40, pitch.bounds.top + 100);
+        this.ctx.beginPath();
         this.ctx.arc(this.width / 2, pitch.bounds.top + 80, 40, 0.2 * Math.PI, 0.8 * Math.PI);
+        this.ctx.stroke();
 
         // Bottom Penalty Area
+        this.ctx.beginPath();
         this.ctx.rect(this.width / 2 - 100, pitch.bounds.bottom - 100, 200, 100);
-        // Bottom Goal Area
-        this.ctx.rect(this.width / 2 - 50, pitch.bounds.bottom - 30, 100, 30);
-        // Bottom Penalty Arc
-        this.ctx.moveTo(this.width / 2 + 40, pitch.bounds.bottom - 100);
-        this.ctx.arc(this.width / 2, pitch.bounds.bottom - 80, 40, 1.2 * Math.PI, 1.8 * Math.PI);
+        this.ctx.stroke();
 
+        // Bottom Goal Area
+        this.ctx.beginPath();
+        this.ctx.rect(this.width / 2 - 50, pitch.bounds.bottom - 30, 100, 30);
+        this.ctx.stroke();
+
+        // Bottom Penalty Arc
+        this.ctx.beginPath();
+        this.ctx.arc(this.width / 2, pitch.bounds.bottom - 80, 40, 1.2 * Math.PI, 1.8 * Math.PI);
         this.ctx.stroke();
 
         // Goals
@@ -75,8 +92,14 @@ export class Renderer {
         this.ctx.fillStyle = '#fff';
         this.ctx.beginPath();
         this.ctx.arc(pitch.topGoal.left, pitch.bounds.top, 3, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.beginPath();
         this.ctx.arc(pitch.topGoal.right, pitch.bounds.top, 3, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.beginPath();
         this.ctx.arc(pitch.bottomGoal.left, pitch.bounds.bottom, 3, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.beginPath();
         this.ctx.arc(pitch.bottomGoal.right, pitch.bounds.bottom, 3, 0, Math.PI * 2);
         this.ctx.fill();
     }
